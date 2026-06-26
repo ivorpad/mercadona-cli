@@ -1,9 +1,9 @@
 // Command mercadona is an unofficial, agent-friendly CLI for tienda.mercadona.es.
 //
-// v0 ships the reliable, anonymous read core: product search (single + batch)
-// and catalog/detail reads. Authenticated commands (login, cart, checkout) land
-// in the next increment. Every command supports --json (data to stdout, logs to
-// stderr) for programmatic use by agents.
+// It covers the anonymous read core (product search single + batch, catalog/detail
+// reads) and the authenticated leg (import-har/import-curl/login, cart, checkout)
+// with a configurable spending cap. Every command supports --json (data to stdout,
+// logs to stderr) for programmatic use by agents.
 package main
 
 import (

@@ -1,7 +1,7 @@
 # mercadona
 
 Unofficial, agent-friendly CLI for `tienda.mercadona.es` — search the catalog, read
-prices, and (soon) build a cart and check out. Single static Go binary, no runtime
+prices, build a cart, and check out. Single static Go binary, no runtime
 deps, structured `--json` output for programmatic/agent use.
 
 > Unofficial. Mercadona has no public API. Bring your own credentials; use at a
@@ -190,11 +190,13 @@ it points back at this binary, so build the CLI first.
 
 ## Status
 
-Read core (`search`, `batch`, `product`, `categories`) + authenticated leg
-(`login`, `import-curl`, `whoami`, `cart`, `checkout`) implemented. Reads, Algolia
-self-refresh, uTLS fingerprint, and the auth plumbing are verified live; the
-cart/checkout bodies await a real-session run (`import-curl` → `whoami` → `cart get`).
-`checkout submit` is gated behind `--yes`.
+Read core (`search`, `batch`, `product`, `categories`) and the full authenticated leg
+(`import-har`/`import-curl`/`set-refresh`, `whoami`, `cart`, `checkout`) are implemented and
+verified live: reads, Algolia self-refresh, the uTLS fingerprint, headless token refresh, and a
+real-session `cart get` → `checkout create` → `set-delivery` → `checkout get` all work, and the
+order total the spending guard reads is confirmed against a live checkout. `checkout submit` is
+gated behind both `--yes` and the `--max` budget cap; it has not been run end-to-end (no real
+order has been placed).
 
 ## Releasing
 
