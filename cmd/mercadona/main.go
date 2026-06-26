@@ -87,7 +87,10 @@ USAGE:
 
 READ COMMANDS (anonymous, no login):
   search <term...>        full-text product search (Algolia)
+                          --category <id|name>  filter to a category (see 'categories')
+                          --fresh               drop frozen (Congelados) + canned (Conservas)
   batch [-f file]         search many terms in one request (100 items ≈ 1 call)
+                          --category/--fresh    apply to every term's top hit
   total [-f file]         deterministic basket total from '<id> [qty]' lines (summed in code)
   product <id>            product detail + price
   categories [--id N]     category tree, or one category's products
@@ -108,9 +111,12 @@ AUTHENTICATED COMMANDS (bring your own credentials):
   set-refresh <token>     seed a refresh token (from one browser login) into config.toml;
                           the CLI then auto-renews the session headlessly (--stdin supported)
   whoami                  verify the session (GET /api/customers/me/)
-  cart get                show current cart (raw JSON)
-  cart add <id> <qty>     add qty of a product to the cart
+  cart get                show current cart (names, qty × unit_price, total; --json for raw)
+  cart add <id> <qty>     add qty of a product to the cart (concise; --json for raw)
   cart set <id> <qty>     set a product's absolute qty (0 removes)
+  cart set-many [-f file] apply many '<id> <qty>' lines in ONE write (0 removes);
+                          prices the basket first so --max refuses before writing
+  cart clear              empty the cart in one write
   checkout get            --checkout <id>   show a checkout (id, total, address, slot)
   checkout addresses      list delivery addresses
   checkout create         open a checkout from the cart (returns id + default address)

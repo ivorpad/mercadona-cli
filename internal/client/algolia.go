@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/ivorjpc/mercadona/internal/config"
 )
@@ -139,21 +140,23 @@ func (h Hit) Category() string {
 	return h.Categories[0].Name
 }
 
-// Search runs a single full-text query against the warehouse index. On an auth/
-// not-found error (a sign the app id rotated) it refreshes creds once and retries.
-func (c *Client) Search(query string, hitsPerPage int) (*SearchResult, error) {
+// Search runs a single full-text query against the warehouse index. Optional
+// facetFilters (e.g. "categories.id:-17" to exclude frozen) are AND-ed together.
+// On an auth/not-found error (a sign the app id rotated) it refreshes creds once
+// and retries.
+func (c *Client) Search(query string, hitsPerPage int, facetFilters ...string) (*SearchResult, error) {
 	c.EnsureAlgolia()
-	res, err := c.searchOnce(query, hitsPerPage)
+	res, err := c.searchOnce(query, hitsPerPage, facetFilters)
 	if err != nil && shouldRefresh(err) {
 		if rerr := c.RefreshAlgolia(); rerr == nil {
-			return c.searchOnce(query, hitsPerPage)
+			return c.searchOnce(query, hitsPerPage, facetFilters)
 		}
 	}
 	return res, err
 }
 
-func (c *Client) searchOnce(query string, hitsPerPage int) (*SearchResult, error) {
-	body := map[string]string{"params": algoliaParams(query, hitsPerPage)}
+func (c *Client) searchOnce(query string, hitsPerPage int, facetFilters []string) (*SearchResult, error) {
+	body := map[string]string{"params": algoliaParams(query, hitsPerPage, facetFilters)}
 	var out SearchResult
 	if err := c.algoliaPost("/1/indexes/"+c.IndexName()+"/query", body, &out); err != nil {
 		return nil, err
@@ -162,19 +165,20 @@ func (c *Client) searchOnce(query string, hitsPerPage int) (*SearchResult, error
 }
 
 // Batch runs many queries in a single multi-index request (100 items ≈ 1 call).
-// Results are returned aligned to the input order.
-func (c *Client) Batch(queries []string, hitsEach int) ([]SearchResult, error) {
+// Results are returned aligned to the input order. Optional facetFilters apply to
+// every query (e.g. "categories.id:-17" so no term's top hit is a frozen item).
+func (c *Client) Batch(queries []string, hitsEach int, facetFilters ...string) ([]SearchResult, error) {
 	c.EnsureAlgolia()
-	res, err := c.batchOnce(queries, hitsEach)
+	res, err := c.batchOnce(queries, hitsEach, facetFilters)
 	if err != nil && shouldRefresh(err) {
 		if rerr := c.RefreshAlgolia(); rerr == nil {
-			return c.batchOnce(queries, hitsEach)
+			return c.batchOnce(queries, hitsEach, facetFilters)
 		}
 	}
 	return res, err
 }
 
-func (c *Client) batchOnce(queries []string, hitsEach int) ([]SearchResult, error) {
+func (c *Client) batchOnce(queries []string, hitsEach int, facetFilters []string) ([]SearchResult, error) {
 	idx := c.IndexName()
 	type reqItem struct {
 		IndexName string `json:"indexName"`
@@ -182,7 +186,7 @@ func (c *Client) batchOnce(queries []string, hitsEach int) ([]SearchResult, erro
 	}
 	reqs := make([]reqItem, len(queries))
 	for i, q := range queries {
-		reqs[i] = reqItem{IndexName: idx, Params: algoliaParams(q, hitsEach)}
+		reqs[i] = reqItem{IndexName: idx, Params: algoliaParams(q, hitsEach, facetFilters)}
 	}
 	var out struct {
 		Results []SearchResult `json:"results"`
@@ -193,20 +197,39 @@ func (c *Client) batchOnce(queries []string, hitsEach int) ([]SearchResult, erro
 	return out.Results, nil
 }
 
-func algoliaParams(query string, hitsPerPage int) string {
+func algoliaParams(query string, hitsPerPage int, facetFilters []string) string {
 	v := url.Values{}
 	v.Set("query", query)
 	v.Set("hitsPerPage", fmt.Sprintf("%d", hitsPerPage))
+	if len(facetFilters) > 0 {
+		// Algolia wants facetFilters as a JSON array string; a flat array ANDs the
+		// entries. url.Values.Encode handles the percent-escaping.
+		if b, err := json.Marshal(facetFilters); err == nil {
+			v.Set("facetFilters", string(b))
+		}
+	}
 	return v.Encode()
 }
 
 func (c *Client) algoliaPost(path string, body, out any) error {
-	host := strings.ToLower(c.Algolia.AppID) + "-dsn.algolia.net"
 	b, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequest("POST", "https://"+host+path, bytes.NewReader(b))
+	url := "https://" + strings.ToLower(c.Algolia.AppID) + "-dsn.algolia.net" + path
+	backoff := defaultRetryBase
+	for attempt := 0; ; attempt++ {
+		err = c.algoliaPostOnce(url, b, out)
+		if !isRateLimited(err) || attempt >= maxRetries {
+			return err
+		}
+		time.Sleep(retryWait(err, backoff))
+		backoff *= 2
+	}
+}
+
+func (c *Client) algoliaPostOnce(url string, b []byte, out any) error {
+	req, err := http.NewRequest("POST", url, bytes.NewReader(b))
 	if err != nil {
 		return err
 	}
@@ -222,7 +245,7 @@ func (c *Client) algoliaPost(path string, body, out any) error {
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &APIError{Status: resp.StatusCode, Body: string(data)}
+		return &APIError{Status: resp.StatusCode, Body: string(data), RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
 	}
 	return json.Unmarshal(data, out)
 }

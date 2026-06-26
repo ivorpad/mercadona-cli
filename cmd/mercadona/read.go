@@ -7,21 +7,119 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/ivorjpc/mercadona/internal/client"
 )
 
+// Top-level category ids excluded by --fresh: frozen and canned/preserved goods,
+// which otherwise dominate the top hits for "gambas", "mejillón", "atún", etc.
+const (
+	catCongelados = 17 // Congelados (frozen)
+	catConservas  = 14 // Conservas, caldos y cremas (canned / preserved)
+)
+
+// categoryFilters turns the --category (id or name) and --fresh flags into Algolia
+// facetFilters, AND-ed together. Empty when neither is set.
+func categoryFilters(cl *client.Client, category string, fresh bool) ([]string, error) {
+	var filters []string
+	if fresh {
+		filters = append(filters,
+			fmt.Sprintf("categories.id:-%d", catCongelados),
+			fmt.Sprintf("categories.id:-%d", catConservas),
+		)
+	}
+	if category != "" {
+		id, err := resolveCategoryID(cl, category)
+		if err != nil {
+			return nil, err
+		}
+		filters = append(filters, fmt.Sprintf("categories.id:%d", id))
+	}
+	return filters, nil
+}
+
+// resolveCategoryID returns a numeric category id directly, or resolves a name
+// against the warehouse category tree (case-insensitive; exact match wins over a
+// substring, ambiguity is an error that lists the candidates).
+func resolveCategoryID(cl *client.Client, arg string) (int, error) {
+	if n, err := strconv.Atoi(strings.TrimSpace(arg)); err == nil {
+		return n, nil
+	}
+	raw, err := cl.Categories()
+	if err != nil {
+		return 0, fmt.Errorf("resolve category %q: %w", arg, err)
+	}
+	var tree struct {
+		Results []struct {
+			ID         int    `json:"id"`
+			Name       string `json:"name"`
+			Categories []struct {
+				ID   int    `json:"id"`
+				Name string `json:"name"`
+			} `json:"categories"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(raw, &tree); err != nil {
+		return 0, fmt.Errorf("parse categories: %w", err)
+	}
+	type cat struct {
+		id   int
+		name string
+	}
+	var all []cat
+	for _, t := range tree.Results {
+		all = append(all, cat{t.ID, t.Name})
+		for _, s := range t.Categories {
+			all = append(all, cat{s.ID, s.Name})
+		}
+	}
+	want := strings.ToLower(strings.TrimSpace(arg))
+	var exact, partial []cat
+	for _, c := range all {
+		lc := strings.ToLower(c.name)
+		switch {
+		case lc == want:
+			exact = append(exact, c)
+		case strings.Contains(lc, want):
+			partial = append(partial, c)
+		}
+	}
+	pick := exact
+	if len(pick) == 0 {
+		pick = partial
+	}
+	switch len(pick) {
+	case 0:
+		return 0, fmt.Errorf("no category matches %q — run `mercadona categories` to list ids", arg)
+	case 1:
+		return pick[0].id, nil
+	default:
+		names := make([]string, len(pick))
+		for i, c := range pick {
+			names[i] = fmt.Sprintf("%d %s", c.id, c.name)
+		}
+		return 0, fmt.Errorf("category %q is ambiguous (%s) — pass a numeric id", arg, strings.Join(names, ", "))
+	}
+}
+
 func cmdSearch(args []string) error {
 	fs := flag.NewFlagSet("search", flag.ExitOnError)
 	cf := addCommon(fs)
 	limit := fs.Int("limit", 24, "max results")
+	category := fs.String("category", "", "filter to a category by id or name (see `mercadona categories`)")
+	fresh := fs.Bool("fresh", false, "exclude frozen (Congelados) and canned (Conservas) results")
 	_ = fs.Parse(reorderArgs(fs, args))
 	if fs.NArg() == 0 {
 		return fmt.Errorf("usage: mercadona search [flags] <term...>")
 	}
 	cl := newClient(cf)
-	res, err := cl.Search(strings.Join(fs.Args(), " "), *limit)
+	filters, err := categoryFilters(cl, *category, *fresh)
+	if err != nil {
+		return err
+	}
+	res, err := cl.Search(strings.Join(fs.Args(), " "), *limit, filters...)
 	if err != nil {
 		return err
 	}
@@ -40,6 +138,8 @@ func cmdBatch(args []string) error {
 	cf := addCommon(fs)
 	file := fs.String("f", "", "file with one term per line ('-' for stdin); else terms are positional args")
 	hits := fs.Int("hits", 1, "results per term")
+	category := fs.String("category", "", "filter every term to a category by id or name (see `mercadona categories`)")
+	fresh := fs.Bool("fresh", false, "exclude frozen (Congelados) and canned (Conservas) results")
 	_ = fs.Parse(reorderArgs(fs, args))
 	terms, err := collectTerms(*file, fs.Args())
 	if err != nil {
@@ -49,7 +149,11 @@ func cmdBatch(args []string) error {
 		return fmt.Errorf("no terms given (use -f file, stdin, or positional args)")
 	}
 	cl := newClient(cf)
-	results, err := cl.Batch(terms, *hits)
+	filters, err := categoryFilters(cl, *category, *fresh)
+	if err != nil {
+		return err
+	}
+	results, err := cl.Batch(terms, *hits, filters...)
 	if err != nil {
 		return err
 	}

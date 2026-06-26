@@ -62,6 +62,11 @@ func cmdCheckout(args []string) error {
 		if bErr := budgetCheckRaw(raw, *maxFlag, "checkout"); bErr != nil {
 			return bErr
 		}
+		// Nudge if the basket is under the delivery minimum (advisory; to stderr so
+		// --json stdout stays clean). The slot/delivery fee is added later by the API.
+		if total, ok := client.ExtractTotal(raw); ok && total < MinOrderEUR {
+			fmt.Fprintf(os.Stderr, "⚠ basket %.2f€ is under the %.0f€ delivery minimum — faltan %.2f€ (the delivery fee is added on top once a slot is chosen)\n", total, MinOrderEUR, MinOrderEUR-total)
+		}
 		return emitRaw(raw)
 	case "set-delivery":
 		if *checkoutID == "" || *addressID == 0 || *slotID == "" {

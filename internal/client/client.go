@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,11 +28,11 @@ const (
 
 // Client is the API entrypoint. The zero value is not usable — use New.
 type Client struct {
-	HTTP      *http.Client
-	BaseURL   string
-	UserAgent string
-	Version   string
-	DeviceID  string
+	HTTP       *http.Client
+	BaseURL    string
+	UserAgent  string
+	Version    string
+	DeviceID   string
 	Warehouse  string // e.g. "mad1"
 	Lang       string // e.g. "es"
 	Token      string // bearer, empty for anonymous (read/search) calls
@@ -68,9 +70,12 @@ func New() *Client {
 }
 
 // APIError carries a non-2xx response so callers (and agents) can branch on it.
+// RetryAfter is the parsed Retry-After header on a 429/503 (>=0 when the server
+// sent one, -1 when absent), used to pace automatic backoff.
 type APIError struct {
-	Status int
-	Body   string
+	Status     int
+	Body       string
+	RetryAfter time.Duration
 }
 
 func (e *APIError) Error() string {
@@ -111,16 +116,79 @@ func (c *Client) newReq(method, url string, body any) (*http.Request, error) {
 	return req, nil
 }
 
-// DoJSON performs an API request and, if it fails with an expired-token 401 and
-// we have credentials, transparently re-authenticates once and retries.
+// Automatic backoff on throttling (HTTP 429/503): retry up to maxRetries times,
+// honouring Retry-After, else exponential backoff with jitter, each wait capped.
+const (
+	maxRetries       = 3
+	defaultRetryBase = 500 * time.Millisecond
+	maxRetryWait     = 10 * time.Second
+)
+
+// isRateLimited reports whether err is a throttling response worth backing off on.
+func isRateLimited(err error) bool {
+	var ae *APIError
+	return errors.As(err, &ae) && (ae.Status == http.StatusTooManyRequests || ae.Status == http.StatusServiceUnavailable)
+}
+
+// parseRetryAfter reads the delta-seconds form of Retry-After; -1 when absent or in
+// the (rare here) HTTP-date form, so the caller falls back to its own backoff.
+func parseRetryAfter(h string) time.Duration {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return -1
+	}
+	if secs, err := strconv.Atoi(h); err == nil && secs >= 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return -1
+}
+
+// retryWait is how long to wait before the next attempt: the server's Retry-After
+// if it sent one, else exponential backoff plus jitter — both capped.
+func retryWait(err error, backoff time.Duration) time.Duration {
+	var ae *APIError
+	if errors.As(err, &ae) && ae.RetryAfter >= 0 {
+		return capWait(ae.RetryAfter)
+	}
+	return capWait(backoff + time.Duration(rand.Int63n(int64(250*time.Millisecond))))
+}
+
+func capWait(d time.Duration) time.Duration {
+	if d > maxRetryWait {
+		return maxRetryWait
+	}
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
+// doWithBackoff issues a request, retrying transient throttling (429/503) so a burst
+// of calls — e.g. pricing a fresh basket, or many searches during a shop — degrades
+// gracefully instead of failing. Non-throttle errors return immediately.
+func (c *Client) doWithBackoff(method, url string, body, out any) error {
+	backoff := defaultRetryBase
+	for attempt := 0; ; attempt++ {
+		err := c.doOnce(method, url, body, out)
+		if !isRateLimited(err) || attempt >= maxRetries {
+			return err
+		}
+		time.Sleep(retryWait(err, backoff))
+		backoff *= 2
+	}
+}
+
+// DoJSON performs an API request with automatic throttle backoff and, if it fails
+// with an expired-token 401 and we have credentials, transparently re-authenticates
+// once and retries.
 func (c *Client) DoJSON(method, url string, body, out any) error {
-	err := c.doOnce(method, url, body, out)
+	err := c.doWithBackoff(method, url, body, out)
 	if c.shouldReauth(err) {
 		c.reauthing = true
 		rerr := c.reauth()
 		c.reauthing = false
 		if rerr == nil {
-			return c.doOnce(method, url, body, out)
+			return c.doWithBackoff(method, url, body, out)
 		}
 	}
 	return err
@@ -148,7 +216,7 @@ func (c *Client) doOnce(method, url string, body, out any) error {
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &APIError{Status: resp.StatusCode, Body: string(data)}
+		return &APIError{Status: resp.StatusCode, Body: string(data), RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
 	}
 	if out != nil && len(data) > 0 {
 		if err := json.Unmarshal(data, out); err != nil {
