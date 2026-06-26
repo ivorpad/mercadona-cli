@@ -132,6 +132,28 @@ mercadona checkout submit   --checkout <id> --yes   # IRREVERSIBLE — places th
 The access token (a SimpleJWT) lasts ~6 weeks; when `whoami` starts returning
 `401 token_not_valid`, re-import a fresh `Copy as cURL` (or use `login`).
 
+### Spending guard (agent safety)
+
+When an agent drives the CLI, cap how much it can ever spend. Set a max total and any
+cart/checkout over it is refused with a non-zero exit and an `error:` line — so the agent stops
+instead of running up a huge order:
+
+```toml
+# ~/.mercadona/config.toml
+[limits]
+max_eur = 100        # refuse any cart/checkout whose total exceeds 100 €
+```
+
+Or per run: `--max 100` (flag) or `MERCADONA_MAX_EUR=100` (env). Precedence is **flag > env > config**;
+`0`/unset = no limit. The cap is enforced on `cart add/set`, `checkout create`, `checkout set-delivery`,
+and — critically — `checkout submit`, which **fails closed**: with a cap set, if it can't read the order
+total it refuses to submit rather than spend blind. (With no cap, `submit` prints a warning.)
+
+```bash
+MERCADONA_MAX_EUR=50 mercadona cart add 10379 99   # → error: BUDGET EXCEEDED … refusing (exit 1)
+mercadona checkout submit --checkout <id> --max 80 --yes   # only submits if total ≤ 80 €
+```
+
 ## Design / reliability
 
 Three layers, by IP-sensitivity:

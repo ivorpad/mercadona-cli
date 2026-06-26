@@ -36,6 +36,9 @@ type Config struct {
 		Warehouse string `toml:"warehouse"`
 		Lang      string `toml:"lang"`
 	} `toml:"defaults"`
+	Limits struct {
+		MaxEUR float64 `toml:"max_eur"` // refuse carts/checkouts over this total (0 = no limit)
+	} `toml:"limits"`
 }
 
 // LoadConfig reads config.toml. A missing file is not an error (empty config).

@@ -512,6 +512,7 @@ func cmdCart(args []string) error {
 	sub, rest := args[0], args[1:]
 	fs := flag.NewFlagSet("cart", flag.ExitOnError)
 	cf := addCommon(fs)
+	maxFlag := fs.Float64("max", 0, "refuse if the resulting cart total exceeds this many € (0 = env/config)")
 	_ = fs.Parse(rest)
 	cl, err := authedClient(cf)
 	if err != nil {
@@ -549,6 +550,9 @@ func cmdCart(args []string) error {
 		if err != nil {
 			return err
 		}
+		if bErr := budgetCheckRaw(raw, *maxFlag, "cart"); bErr != nil {
+			return bErr
+		}
 		return emitRaw(raw)
 	default:
 		return fmt.Errorf("unknown cart subcommand %q (get|add|set)", sub)
@@ -566,6 +570,7 @@ func cmdCheckout(args []string) error {
 	addressID := fs.Int("address", 0, "delivery address id")
 	slotID := fs.String("slot", "", "delivery slot id")
 	yes := fs.Bool("yes", false, "REQUIRED to actually place the order (irreversible, spends money)")
+	maxFlag := fs.Float64("max", 0, "refuse a checkout whose total exceeds this many € (0 = env/config)")
 	_ = fs.Parse(rest)
 	cl, err := authedClient(cf)
 	if err != nil {
@@ -596,6 +601,9 @@ func cmdCheckout(args []string) error {
 		if err != nil {
 			return err
 		}
+		if bErr := budgetCheckRaw(raw, *maxFlag, "checkout"); bErr != nil {
+			return bErr
+		}
 		return emitRaw(raw)
 	case "set-delivery":
 		if *checkoutID == "" || *addressID == 0 || *slotID == "" {
@@ -605,6 +613,9 @@ func cmdCheckout(args []string) error {
 		if err != nil {
 			return err
 		}
+		if bErr := budgetCheckRaw(raw, *maxFlag, "checkout (with delivery)"); bErr != nil {
+			return bErr
+		}
 		return emitRaw(raw)
 	case "submit":
 		if *checkoutID == "" {
@@ -612,6 +623,24 @@ func cmdCheckout(args []string) error {
 		}
 		if !*yes {
 			return fmt.Errorf("refusing to place a REAL order without --yes (irreversible)")
+		}
+		// Spending guard: verify the order total against the cap before paying.
+		maxEUR, mErr := resolveMax(*maxFlag)
+		if mErr != nil {
+			return mErr
+		}
+		if maxEUR > 0 {
+			chk, gErr := cl.GetCheckout(*checkoutID)
+			if gErr != nil {
+				return fmt.Errorf("refusing to submit: couldn't fetch the checkout to verify the %.2f€ limit: %w", maxEUR, gErr)
+			}
+			total, ok := client.ExtractTotal(chk)
+			if bErr := checkBudget(total, ok, maxEUR, "submit order", true); bErr != nil {
+				return bErr
+			}
+			fmt.Fprintf(os.Stderr, "budget ok: order total %.2f€ ≤ %.2f€ limit\n", total, maxEUR)
+		} else {
+			fmt.Fprintln(os.Stderr, "⚠ no spending limit set — submitting without a budget guard (set [limits].max_eur, MERCADONA_MAX_EUR, or --max to cap spend).")
 		}
 		raw, err := cl.SubmitOrder(*checkoutID)
 		if err != nil {
@@ -630,6 +659,55 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// ---- spending guard ----
+
+// resolveMax returns the spending cap in € from (in order) the --max flag, the
+// MERCADONA_MAX_EUR env var, or [limits].max_eur in config.toml. 0 = no limit.
+func resolveMax(flagMax float64) (float64, error) {
+	if flagMax > 0 {
+		return flagMax, nil
+	}
+	if s := os.Getenv("MERCADONA_MAX_EUR"); s != "" {
+		v, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid MERCADONA_MAX_EUR %q: %v", s, err)
+		}
+		return v, nil
+	}
+	cfg, _ := config.LoadConfig()
+	return cfg.Limits.MaxEUR, nil
+}
+
+// checkBudget fails when a known total exceeds the cap. With failClosed an
+// unreadable total is also a failure — used before the irreversible submit, where
+// "can't verify the total" must mean "don't spend". maxEUR <= 0 disables the guard.
+func checkBudget(total float64, haveTotal bool, maxEUR float64, action string, failClosed bool) error {
+	if maxEUR <= 0 {
+		return nil
+	}
+	if !haveTotal {
+		if failClosed {
+			return fmt.Errorf("refusing to %s: couldn't read the total to enforce the %.2f€ limit (set MERCADONA_MAX_EUR=0 to disable the guard)", action, maxEUR)
+		}
+		return nil
+	}
+	if total > maxEUR {
+		return fmt.Errorf("BUDGET EXCEEDED: %s total %.2f€ is over the %.2f€ limit — refusing (raise with --max, MERCADONA_MAX_EUR, or [limits].max_eur)", action, total, maxEUR)
+	}
+	return nil
+}
+
+// budgetCheckRaw enforces the configured cap against a total parsed from a cart or
+// checkout response (used by the non-irreversible steps; failClosed=false).
+func budgetCheckRaw(raw json.RawMessage, flagMax float64, action string) error {
+	maxEUR, err := resolveMax(flagMax)
+	if err != nil {
+		return err
+	}
+	total, ok := client.ExtractTotal(raw)
+	return checkBudget(total, ok, maxEUR, action, false)
 }
 
 // ---- output helpers ----
@@ -734,6 +812,12 @@ AUTHENTICATED COMMANDS (bring your own credentials):
   checkout slots          --address <id>   list delivery slots for an address
   checkout set-delivery   --checkout <id> --address <id> --slot <id>
   checkout submit         --checkout <id> --yes   (IRREVERSIBLE: places the order)
+
+SPENDING GUARD (agent safety — caps how much can be spent):
+  --max <eur>             refuse any cart/checkout whose total exceeds <eur>.
+                          Also MERCADONA_MAX_EUR env or [limits] max_eur in config.toml.
+                          'checkout submit' fails CLOSED: with a cap set, if the total
+                          can't be read it refuses rather than spending.
 
 COMMON FLAGS (place right after the (sub)command):
   --wh mad1               warehouse code
