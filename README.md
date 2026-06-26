@@ -52,7 +52,7 @@ mercadona categories                         # category tree
 mercadona categories --id 112 --json         # one category's products (raw JSON)
 ```
 
-Common flags: `--wh mad1` (warehouse), `--lang es`, `--json`.
+Common flags: `--wh mad1` (warehouse), `--lang es`, `--json` — and they can go anywhere after the (sub)command, not just up front.
 Data goes to **stdout**, logs/errors to **stderr**, exit code `1` on error — friendly to scripts and agents.
 
 Example:
@@ -103,7 +103,7 @@ refresh_token = "<your refresh token>"   # the durable, headless-renewable crede
 warehouse = "mad1"
 ```
 
-`MERCADONA_TOKEN`/`MERCADONA_COOKIE`/`MERCADONA_CUSTOMER` env vars also work for one-off runs.
+`MERCADONA_TOKEN`/`MERCADONA_COOKIE`/`MERCADONA_CUSTOMER` (and `MERCADONA_USER`/`MERCADONA_PASS`) env vars also work for one-off runs.
 
 **Quick one-off (no refresh):** `mercadona import-curl --file s.txt` from a DevTools "Copy as
 cURL" of any `…/api/customers/…` request extracts the Bearer token + cookie + customer id. It has
@@ -120,14 +120,20 @@ customer can also come from `MERCADONA_TOKEN` / `MERCADONA_COOKIE` /
 #### Test the checkout flow with your session
 
 ```bash
-mercadona import-curl --file session.txt   # from DevTools "Copy as cURL"
+mercadona import-har --file tienda.mercadona.es.har   # auth (preferred; or import-curl)
 mercadona whoami                           # → "ok — customer id=…"  (confirms auth)
 mercadona cart get --json                  # inspect current cart
-mercadona cart add 51110 2                 # add 2× a product
-mercadona checkout create --json           # open checkout → returns id + delivery slots
+mercadona cart add 51110 2 --max 80        # add 2× a product (capped at 80 €)
+mercadona checkout create --json           # open a checkout → id + default address
+mercadona checkout addresses               # list saved delivery addresses
+mercadona checkout slots --address <id>    # delivery slots (they hang off the address, not the checkout)
+mercadona checkout get --checkout <id>     # show a checkout: total, address, slot
 mercadona checkout set-delivery --checkout <id> --address <id> --slot <id>
-mercadona checkout submit   --checkout <id> --yes   # IRREVERSIBLE — places the order
+mercadona checkout submit --checkout <id> --max 80 --yes   # IRREVERSIBLE — places the order
 ```
+
+`cart add <id> <qty>` adds to the existing quantity; `cart set <id> <qty>` sets the absolute
+quantity (`0` removes the line). Both accept `--max`.
 
 The access token (a SimpleJWT) lasts ~6 weeks; when `whoami` starts returning
 `401 token_not_valid`, re-import a fresh `Copy as cURL` (or use `login`).
@@ -174,11 +180,12 @@ Three layers, by IP-sensitivity:
 
 ## Config
 
-State lives under the OS config dir (`~/Library/Application Support/mercadona` on macOS,
-`~/.config/mercadona` elsewhere). Override with `MERCADONA_CONFIG_DIR`.
+State lives in `~/.mercadona/` (override with `MERCADONA_CONFIG_DIR`):
 
-- `algolia.json` — cached/refreshed search credentials.
-- `token.json` — cached bearer token (added with the auth commands).
+- `config.toml` — user-authored (`0600`): `[auth] refresh_token` (+ optional `username`/`password`),
+  `[defaults] warehouse`/`lang`, `[limits] max_eur`.
+- `token.json` — cached session: access + refresh token + cookie (machine-managed).
+- `algolia.json` — cached/auto-refreshed search credentials.
 
 ## Claude skill
 
@@ -209,9 +216,11 @@ Push a semver tag — GitHub Actions
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-**One-time setup** — add an Actions secret (repo → Settings → Secrets and variables → Actions):
-
-- `NPM_TOKEN` — an npm automation token with publish rights to the `@ivorpad` scope.
+The workflow is hardened: actions are pinned to commit SHAs, permissions are per-job
+least-privilege, and **npm publishes via OIDC Trusted Publishing** (no long-lived token) with a
+SLSA provenance attestation. One-time setup: configure a Trusted Publisher for `@ivorpad/mercadona`
+on npmjs.com (Settings → Trusted Publisher → GitHub Actions: user `ivorpad`, repo `mercadona-cli`,
+workflow `release.yml`).
 
 Dry-run the build locally (no publish; artifacts land in `./dist`):
 
