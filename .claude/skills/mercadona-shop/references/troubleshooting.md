@@ -40,6 +40,18 @@ the authed layer:
 - As a last resort, mint fresh Akamai clearance by loading `tienda.mercadona.es` in a real
   browser on the *same IP*, then `import-curl` that session (token + fresh cookie).
 
+**Rate limits (HTTP 429 / 503).** The client now **backs off and retries automatically** (honouring
+`Retry-After`, a few attempts), so an occasional throttle just shows up as a short pause, not a
+failure — let it ride. To push gentler in the first place:
+
+- Prefer **one `batch`** call (≈100 terms in a single request) over many individual `search` calls.
+- `set-many` prices a *fresh* basket by fetching each new product; it caps that burst at 4 parallel
+  GETs. If you're getting throttled, lower it with `MERCADONA_CONCURRENCY=1` (or `2`), or `cart
+  clear` + build in a couple of smaller `set-many` batches.
+- If a command still fails after backoff, wait a bit and retry — don't loop on it tightly (that
+  makes Akamai escalate). Persistent 403/challenge pages are an IP/clearance problem, not a rate
+  limit — see above.
+
 Search runs against Algolia (not Akamai) and works from anywhere. If search starts failing
 with DNS/`NXDOMAIN` or `401/403/404`, the Algolia app-id rotated — the CLI auto-rediscovers it
 from the live SPA bundle and retries, so just run the command again.
@@ -55,10 +67,22 @@ from. Don't trust `hit[0]` for anything the user was specific about.
 warehouse. Ids and prices are per-warehouse; pass the user's `--wh` (e.g. `--wh bcn1`)
 consistently across search, cart and checkout.
 
-**A cart change didn't stick / a removed item reappeared** — the cart PUT carries no version,
-so back-to-back `cart add`/`set` calls can race: the second reads the pre-change cart (backend
-read lag) and overwrites the first. Re-issue the single change and verify with `cart get`; when
-changing several lines, do them one at a time with a `cart get` between each, not in a burst.
+**Quantity looks wrong / bought packs instead of units** — the user's amount is in *their* units,
+the cart quantity is in the *product's*. "6 huevos" on a by-the-dozen product is 1 pack, not 6;
+"1 kg de plátanos" on a per-unit product is ~6 unidades, not quantity `1`. Check
+`packaging`/`reference_format` and translate before setting the quantity. And a wildly large count
+("200 huevos") from a dictated/typed list is usually a typo — confirm before it reaches the cart.
+
+**A cart change didn't stick / a removed item reappeared** — the cart backend is **eventually
+consistent**: reads can briefly lag writes. Two effects follow. (1) Back-to-back *separate*
+`cart add`/`set` writes can race — the second reads the pre-change cart and overwrites the first.
+(2) Even a single write can look like it "didn't take" if you `cart get` a beat too soon. The fix
+for both: **use `cart set-many` (or `cart clear`)** — one read, one write, no inter-write race — and
+if a read looks stale, just re-run `cart get`; it converges in a second or two. This is **not** a CLI
+or `--max` parser bug (that was specifically chased down and disproven — `cart set <id> 0 --max N`
+parses and removes correctly; the "didn't remove" was read lag). Don't add a workaround for a
+nonexistent flag bug; prefer `set-many` and re-read. If you must fire several separate `add`/`set`
+writes, still space them one at a time with a `cart get` between each, not in a burst.
 
 ## Checkout
 
