@@ -134,9 +134,16 @@ The access token (a SimpleJWT) lasts ~6 weeks; when `whoami` starts returning
 
 ### Spending guard (agent safety)
 
-When an agent drives the CLI, cap how much it can ever spend. Set a max total and any
-cart/checkout over it is refused with a non-zero exit and an `error:` line — so the agent stops
-instead of running up a huge order:
+When an agent drives the CLI, cap how much it can ever spend. Any cart/checkout over the cap is
+refused with a non-zero exit and an `error:` line — so the agent stops instead of running up a huge
+order. Pass it as a flag (which can go anywhere on the line):
+
+```bash
+mercadona cart add 10379 99 --max 50                       # → error: BUDGET EXCEEDED … refusing (exit 1)
+mercadona checkout submit --checkout <id> --max 80 --yes   # submits only if total ≤ 80 €
+```
+
+Or set it once so every command is capped — `MERCADONA_MAX_EUR=100` (env), or in config:
 
 ```toml
 # ~/.mercadona/config.toml
@@ -144,15 +151,10 @@ instead of running up a huge order:
 max_eur = 100        # refuse any cart/checkout whose total exceeds 100 €
 ```
 
-Or per run: `--max 100` (flag) or `MERCADONA_MAX_EUR=100` (env). Precedence is **flag > env > config**;
-`0`/unset = no limit. The cap is enforced on `cart add/set`, `checkout create`, `checkout set-delivery`,
-and — critically — `checkout submit`, which **fails closed**: with a cap set, if it can't read the order
-total it refuses to submit rather than spend blind. (With no cap, `submit` prints a warning.)
-
-```bash
-MERCADONA_MAX_EUR=50 mercadona cart add 10379 99   # → error: BUDGET EXCEEDED … refusing (exit 1)
-mercadona checkout submit --checkout <id> --max 80 --yes   # only submits if total ≤ 80 €
-```
+Precedence is **flag > env > config**; `0`/unset = no limit. Enforced on `cart add/set`,
+`checkout create`, `checkout set-delivery`, and — critically — `checkout submit`, which **fails
+closed**: with a cap set, if it can't read the order total it refuses rather than spend blind.
+(With no cap, `submit` prints a warning.)
 
 ## Design / reliability
 

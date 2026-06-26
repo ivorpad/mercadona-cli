@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"flag"
+	"reflect"
+	"testing"
+)
 
 // checkBudget is the safety-critical gate — exercise the table exhaustively.
 func TestCheckBudget(t *testing.T) {
@@ -26,6 +30,39 @@ func TestCheckBudget(t *testing.T) {
 			if (err != nil) != c.wantErr {
 				t.Errorf("checkBudget(total=%v have=%v max=%v failClosed=%v) err=%v, wantErr=%v",
 					c.total, c.haveTotal, c.maxEUR, c.failClosed, err, c.wantErr)
+			}
+		})
+	}
+}
+
+// reorderArgs must let flags appear after positionals (otherwise --max would be
+// silently dropped — a safety footgun).
+func TestReorderArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		max  float64
+		json bool
+		pos  []string
+	}{
+		{"flag after positionals", []string{"add", "123", "5", "--max", "50"}, 50, false, []string{"add", "123", "5"}},
+		{"bool flag interspersed", []string{"add", "--json", "123"}, 0, true, []string{"add", "123"}},
+		{"equals form after positional", []string{"add", "123", "--max=20"}, 20, false, []string{"add", "123"}},
+		{"flags first still work", []string{"--max", "9", "--json", "x"}, 9, true, []string{"x"}},
+		{"double-dash terminator", []string{"--max", "9", "--", "--weird"}, 9, false, []string{"--weird"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fs := flag.NewFlagSet("t", flag.ContinueOnError)
+			maxV := fs.Float64("max", 0, "")
+			jsonV := fs.Bool("json", false, "")
+			fs.String("wh", "mad1", "")
+			if err := fs.Parse(reorderArgs(fs, c.in)); err != nil {
+				t.Fatalf("parse(%v): %v", c.in, err)
+			}
+			if *maxV != c.max || *jsonV != c.json || !reflect.DeepEqual(fs.Args(), c.pos) {
+				t.Errorf("in=%v → max=%v json=%v pos=%v; want max=%v json=%v pos=%v",
+					c.in, *maxV, *jsonV, fs.Args(), c.max, c.json, c.pos)
 			}
 		})
 	}

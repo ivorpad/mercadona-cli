@@ -94,11 +94,49 @@ func newClient(c *common) *client.Client {
 	return cl
 }
 
+// reorderArgs lets flags appear anywhere among positional args. The stdlib flag
+// parser stops at the first positional, so `cart add 123 5 --max 50` would
+// silently drop --max (dangerous for a safety flag); this hoists flags (and their
+// values) ahead of a `--` terminator so a normal fs.Parse sees them all. Honours
+// bool flags (no value), `--flag=value`, and an explicit `--`.
+func reorderArgs(fs *flag.FlagSet, args []string) []string {
+	var flags, positional []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			positional = append(positional, args[i+1:]...)
+			break
+		}
+		if len(a) > 1 && a[0] == '-' {
+			flags = append(flags, a)
+			name := strings.TrimLeft(a, "-")
+			if strings.IndexByte(name, '=') >= 0 {
+				continue // --flag=value: value is in the same token
+			}
+			if f := fs.Lookup(name); f != nil && !isBoolFlag(f) && i+1 < len(args) {
+				flags = append(flags, args[i+1]) // consume this flag's value
+				i++
+			}
+			continue
+		}
+		positional = append(positional, a)
+	}
+	out := make([]string, 0, len(flags)+1+len(positional))
+	out = append(out, flags...)
+	out = append(out, "--") // keep positionals positional even if they start with '-'
+	return append(out, positional...)
+}
+
+func isBoolFlag(f *flag.Flag) bool {
+	bf, ok := f.Value.(interface{ IsBoolFlag() bool })
+	return ok && bf.IsBoolFlag()
+}
+
 func cmdSearch(args []string) error {
 	fs := flag.NewFlagSet("search", flag.ExitOnError)
 	cf := addCommon(fs)
 	limit := fs.Int("limit", 24, "max results")
-	_ = fs.Parse(args)
+	_ = fs.Parse(reorderArgs(fs, args))
 	if fs.NArg() == 0 {
 		return fmt.Errorf("usage: mercadona search [flags] <term...>")
 	}
@@ -122,7 +160,7 @@ func cmdBatch(args []string) error {
 	cf := addCommon(fs)
 	file := fs.String("f", "", "file with one term per line ('-' for stdin); else terms are positional args")
 	hits := fs.Int("hits", 1, "results per term")
-	_ = fs.Parse(args)
+	_ = fs.Parse(reorderArgs(fs, args))
 	terms, err := collectTerms(*file, fs.Args())
 	if err != nil {
 		return err
@@ -156,7 +194,7 @@ func cmdBatch(args []string) error {
 func cmdProduct(args []string) error {
 	fs := flag.NewFlagSet("product", flag.ExitOnError)
 	cf := addCommon(fs)
-	_ = fs.Parse(args)
+	_ = fs.Parse(reorderArgs(fs, args))
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: mercadona product [flags] <id>")
 	}
@@ -183,7 +221,7 @@ func cmdCategories(args []string) error {
 	fs := flag.NewFlagSet("categories", flag.ExitOnError)
 	cf := addCommon(fs)
 	id := fs.String("id", "", "fetch a single category (with products) by id")
-	_ = fs.Parse(args)
+	_ = fs.Parse(reorderArgs(fs, args))
 	cl := newClient(cf)
 	var raw json.RawMessage
 	var err error
@@ -277,7 +315,7 @@ func authedClient(cf *common) (*client.Client, error) {
 func cmdWhoami(args []string) error {
 	fs := flag.NewFlagSet("whoami", flag.ExitOnError)
 	cf := addCommon(fs)
-	_ = fs.Parse(args)
+	_ = fs.Parse(reorderArgs(fs, args))
 	cl, err := authedClient(cf)
 	if err != nil {
 		return err
@@ -304,7 +342,7 @@ var (
 func cmdImportCurl(args []string) error {
 	fs := flag.NewFlagSet("import-curl", flag.ExitOnError)
 	file := fs.String("file", "-", "file with a DevTools 'Copy as cURL' command ('-' = stdin)")
-	_ = fs.Parse(args)
+	_ = fs.Parse(reorderArgs(fs, args))
 	var (
 		data []byte
 		err  error
@@ -348,7 +386,7 @@ func cmdImportHar(args []string) error {
 	fs := flag.NewFlagSet("import-har", flag.ExitOnError)
 	file := fs.String("file", "", "path to a .har file ('-' or omitted = stdin; may also be passed positionally)")
 	save := fs.Bool("save", true, "seed the refresh token into ~/.mercadona/config.toml for headless auto-renew")
-	_ = fs.Parse(args)
+	_ = fs.Parse(reorderArgs(fs, args))
 
 	src := *file
 	if src == "" && fs.NArg() == 1 {
@@ -433,7 +471,7 @@ func cmdLogin(args []string) error {
 	passAlias := fs.String("pass", "", "alias of --password")
 	passStdin := fs.Bool("password-stdin", false, "read the password from stdin")
 	save := fs.Bool("save", false, "save credentials to ~/.mercadona/config.toml for auto-relogin")
-	_ = fs.Parse(args)
+	_ = fs.Parse(reorderArgs(fs, args))
 
 	cfg, _ := config.LoadConfig()
 	user2 := firstNonEmpty(*user, os.Getenv("MERCADONA_USER"), cfg.Auth.Username)
@@ -478,7 +516,7 @@ func cmdLogin(args []string) error {
 func cmdSetRefresh(args []string) error {
 	fs := flag.NewFlagSet("set-refresh", flag.ExitOnError)
 	stdin := fs.Bool("stdin", false, "read the refresh token from stdin (keeps it out of argv)")
-	_ = fs.Parse(args)
+	_ = fs.Parse(reorderArgs(fs, args))
 	var rt string
 	switch {
 	case *stdin:
@@ -513,7 +551,7 @@ func cmdCart(args []string) error {
 	fs := flag.NewFlagSet("cart", flag.ExitOnError)
 	cf := addCommon(fs)
 	maxFlag := fs.Float64("max", 0, "refuse if the resulting cart total exceeds this many € (0 = env/config)")
-	_ = fs.Parse(rest)
+	_ = fs.Parse(reorderArgs(fs, rest))
 	cl, err := authedClient(cf)
 	if err != nil {
 		return err
@@ -571,7 +609,7 @@ func cmdCheckout(args []string) error {
 	slotID := fs.String("slot", "", "delivery slot id")
 	yes := fs.Bool("yes", false, "REQUIRED to actually place the order (irreversible, spends money)")
 	maxFlag := fs.Float64("max", 0, "refuse a checkout whose total exceeds this many € (0 = env/config)")
-	_ = fs.Parse(rest)
+	_ = fs.Parse(reorderArgs(fs, rest))
 	cl, err := authedClient(cf)
 	if err != nil {
 		return err
@@ -819,7 +857,7 @@ SPENDING GUARD (agent safety — caps how much can be spent):
                           'checkout submit' fails CLOSED: with a cap set, if the total
                           can't be read it refuses rather than spending.
 
-COMMON FLAGS (place right after the (sub)command):
+COMMON FLAGS (may go anywhere after the (sub)command):
   --wh mad1               warehouse code
   --lang es               language
   --json                  emit raw JSON (data→stdout, logs→stderr)
