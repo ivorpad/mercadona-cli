@@ -48,6 +48,8 @@ func main() {
 		err = cmdLogin(os.Args[2:])
 	case "import-curl":
 		err = cmdImportCurl(os.Args[2:])
+	case "import-har":
+		err = cmdImportHar(os.Args[2:])
 	case "set-refresh":
 		err = cmdSetRefresh(os.Args[2:])
 	case "whoami":
@@ -334,6 +336,65 @@ func cmdImportCurl(args []string) error {
 	// Never echo secrets — report only lengths + the (non-secret) customer id.
 	fmt.Fprintf(os.Stderr, "imported session: token=%s, cookie=%s, customer=%s\n",
 		present(token), present(cookie), orDefault(customer, "me"))
+	fmt.Fprintln(os.Stderr, "→ verify with: mercadona whoami")
+	return nil
+}
+
+// import-har extracts a session from a browser HAR export (DevTools → Network →
+// "Export HAR…"). Unlike import-curl it also captures the durable refresh token
+// and, by default, seeds it into ~/.mercadona/config.toml so the CLI re-auths
+// headlessly forever — works for both email/password and Google-login accounts.
+func cmdImportHar(args []string) error {
+	fs := flag.NewFlagSet("import-har", flag.ExitOnError)
+	file := fs.String("file", "", "path to a .har file ('-' or omitted = stdin; may also be passed positionally)")
+	save := fs.Bool("save", true, "seed the refresh token into ~/.mercadona/config.toml for headless auto-renew")
+	_ = fs.Parse(args)
+
+	src := *file
+	if src == "" && fs.NArg() == 1 {
+		src = fs.Arg(0)
+	}
+	var (
+		data []byte
+		err  error
+	)
+	if src == "" || src == "-" {
+		data, err = io.ReadAll(os.Stdin)
+	} else {
+		data, err = os.ReadFile(src)
+	}
+	if err != nil {
+		return err
+	}
+
+	sess, err := client.ParseHAR(data)
+	if err != nil {
+		return err
+	}
+	if err := client.SaveHARSession(sess); err != nil {
+		return err
+	}
+
+	seeded := false
+	if *save && sess.RefreshToken != "" {
+		cfg, _ := config.LoadConfig()
+		cfg.Auth.RefreshToken = sess.RefreshToken
+		if err := config.SaveConfig(cfg); err != nil {
+			return fmt.Errorf("session cached but writing config.toml failed: %w", err)
+		}
+		seeded = true
+	}
+
+	// Never echo secrets — report only lengths + the (non-secret) customer id.
+	fmt.Fprintf(os.Stderr, "imported HAR session (%s login): access=%s, refresh=%s, cookie=%s, customer=%s\n",
+		orDefault(sess.LoginKind, "unknown"), present(sess.AccessToken), present(sess.RefreshToken),
+		present(sess.Cookie), orDefault(sess.CustomerID, "(from JWT)"))
+	switch {
+	case seeded:
+		fmt.Fprintln(os.Stderr, "→ refresh token seeded into ~/.mercadona/config.toml (0600): the CLI now auto-renews headlessly — always authenticated.")
+	case sess.RefreshToken == "":
+		fmt.Fprintln(os.Stderr, "⚠ no refresh token in this HAR — cached the access token only (expires ~6 wk, no auto-renew). Re-export a HAR that includes the login response, or use `set-refresh`.")
+	}
 	fmt.Fprintln(os.Stderr, "→ verify with: mercadona whoami")
 	return nil
 }
@@ -659,6 +720,9 @@ AUTHENTICATED COMMANDS (bring your own credentials):
                           creds: MERCADONA_USER/MERCADONA_PASS, --user/--pass, or --password-stdin
   import-curl [--file f]  import a browser session from a DevTools 'Copy as cURL'
                           (extracts Bearer token + cookie + customer id; '-' = stdin)
+  import-har [--file f]   PREFERRED: import a browser session from a DevTools HAR
+                          export; extracts the refresh token → config.toml for
+                          headless auto-renew (works for email AND Google accounts)
   set-refresh <token>     seed a refresh token (from one browser login) into config.toml;
                           the CLI then auto-renews the session headlessly (--stdin supported)
   whoami                  verify the session (GET /api/customers/me/)

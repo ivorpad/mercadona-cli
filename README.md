@@ -64,34 +64,53 @@ $ mercadona batch -f lista.txt
 • mayonesa         → [13406] Mayonesa Hacendado — 1.20€ (2.400€/L)
 ```
 
-### Authenticated: `login` / `import-curl`, `whoami`, `cart`, `checkout`
+### Authenticated: `import-har` (preferred) / `import-curl` / `login`, `whoami`, `cart`, `checkout`
 
-The API authenticates with a **Bearer token** (a SimpleJWT). **Password login requires a
-Google reCAPTCHA Enterprise token**, so it can't be done headlessly — the first login must
-happen in a browser. After that, the **refresh token renews the session headlessly, forever**
-(`POST /api/auth/tokens/ {refresh_token}` needs no captcha, and rotates the token). Verified.
+The API authenticates with a **Bearer token** (a SimpleJWT). The first sign-in must happen in a
+browser (password login needs a Google reCAPTCHA Enterprise token; Google-account users have no
+password at all). After that, the **refresh token renews the session headlessly, forever** —
+`POST /api/auth/tokens/ {refresh_token}` needs no captcha and rotates the token. Verified.
 
-**Recommended for automation — one browser login, then headless auto-refresh:**
-1. Log in once at tienda.mercadona.es. In DevTools, grab the **`refresh_token`** from the
-   `POST /api/auth/tokens/` response (Network) or from local storage.
-2. Put it in `~/.mercadona/config.toml` (0600):
-   ```toml
-   [auth]
-   refresh_token = "<your refresh token>"   # the durable, headless-renewable credential
-   [defaults]
-   warehouse = "mad1"
-   ```
-3. Done. On every `401 token_not_valid` the CLI refreshes and retries automatically — no
-   browser, no captcha, unattended. (`MERCADONA_TOKEN`/`MERCADONA_COOKIE`/`MERCADONA_CUSTOMER`
-   env vars also work for one-off runs.)
+**Two login methods, one outcome.** However you sign in, the response carries the same durable
+`refresh_token`, so the CLI automates identically:
 
-**Quick one-off (no refresh):** `mercadona import-curl --file s.txt` from a DevTools
-"Copy as cURL" of any `…/api/customers/…` request extracts the Bearer token + cookie + customer
-id. It has no refresh token, so it can't auto-renew — re-import (or re-seed the refresh token)
-when the access token expires.
+| Method | Endpoint | Request body | Response |
+|---|---|---|---|
+| Email + password | `POST /api/auth/tokens/` | `{username, password, recaptcha_token}` | `{access_token, customer_id, refresh_token}` |
+| Google sign-in | `POST /api/auth/social/google/` | `{id_token, postal_code}` | `{access_token, customer_uuid, refresh_token}` |
+
+**✅ Preferred login method — `import-har`.** One browser login (email *or* Google), then
+headless forever. Export a HAR after signing in and let the CLI pull the refresh token out for you:
+
+```bash
+# DevTools → Network → ⤓ "Export HAR…"  (after you've logged in, by either method), then:
+mercadona import-har --file tienda.mercadona.es.har
+mercadona whoami     # confirms it's authenticated
+```
+
+`import-har` seeds `refresh_token` into `~/.mercadona/config.toml` (0600) and caches the current
+access token + cookie. From then on every `401 token_not_valid` triggers an automatic refresh +
+retry — no browser, no captcha, unattended. (It reads only auth *responses* and Bearer/Cookie
+*headers*; the password in the request body is never touched.)
+
+Prefer to do it by hand? Write the token yourself — `mercadona set-refresh <token>` (or edit
+`~/.mercadona/config.toml`):
+
+```toml
+[auth]
+refresh_token = "<your refresh token>"   # the durable, headless-renewable credential
+[defaults]
+warehouse = "mad1"
+```
+
+`MERCADONA_TOKEN`/`MERCADONA_COOKIE`/`MERCADONA_CUSTOMER` env vars also work for one-off runs.
+
+**Quick one-off (no refresh):** `mercadona import-curl --file s.txt` from a DevTools "Copy as
+cURL" of any `…/api/customers/…` request extracts the Bearer token + cookie + customer id. It has
+no refresh token, so it can't auto-renew — re-import when the access token expires.
 
 > `mercadona login --user … --password …` exists but will fail without a `recaptcha_token`
-> (browser-only); prefer the refresh-token flow above for automation.
+> (browser-only), and does nothing for Google accounts; prefer the HAR/refresh-token flow above.
 
 The customer id is read automatically from the token's `customer_uuid` claim, so
 you never pass it (the literal `me` alias is rejected with 403). Token/cookie/
