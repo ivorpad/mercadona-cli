@@ -47,7 +47,7 @@ mercadona search queso                      # full-text product search
 mercadona search --limit 5 --json mayonesa  # structured output for agents
 mercadona batch -f lista.txt                 # many terms in ONE request (≈100 items / call)
 printf 'queso\ncarne\nmayonesa\n' | mercadona batch -f -
-mercadona product 13406                      # detail + price
+mercadona product 13406                      # detail, price, nutrition (when available)
 mercadona categories                         # category tree
 mercadona categories --id 112 --json         # one category's products (raw JSON)
 ```
@@ -273,22 +273,39 @@ $ mercadona categories --id 112 --json | jq '.. | objects | select(.price_decrea
 | `26029` | Garbanzo cocido Hacendado | 0.85€ | 0.80€ | -6% |
 | `6305` | Pajaritas vegetales Hacendado | 1.00€ | 0.90€ | -10% |
 
-### Read allergens & ingredients per product (diet-safe baskets)
+### Read nutrition, allergens & ingredients per product (diet-safe baskets)
+
+`product` prints the per-100g nutrition table for products that have one (mostly
+prepared/processed items — most staples don't carry it):
 
 ```console
-$ mercadona product 10379 --json | jq '{display_name, brand, ean, nutrition_information}'
+$ mercadona product 17559
+[17559] Empanadilla de bacon 11% y queso 32%
+  precio: 1.40€  (12.728 kg)
+  formato: Pieza
+  url: https://tienda.mercadona.es/product/17559/empanadilla-bacon-11-queso-32-pieza
+  nutrición (Por 100 g):
+    energía: 385 kcal / 1598 kJ
+    Grasas: 29 g
+      Saturadas: 15 g
+    Hidratos de carbono: 21 g
+      Azúcares: 2 g
+    Proteínas: 9.2 g
+    Sal: 1.1 g
+```
+
+For agents, `--json` carries the structured table at `product_information.nutritional_information`,
+next to `nutrition_information` (allergens + ingredients), `brand`, `ean`, `origin`, and `details`:
+
+```console
+$ mercadona product 17559 --json | jq '{kcal: .product_information.nutritional_information[0].energy_calories.amount, allergens: .nutrition_information.allergens}'
 {
-  "display_name": "Leche entera Hacendado",
-  "brand": "Hacendado",
-  "ean": "8402001002076",
-  "nutrition_information": {
-    "allergens": "Contiene leche y sus derivados (incluida la lactosa).",
-    "ingredients": "Leche entera de vaca"
-  }
+  "kcal": "385.0",
+  "allergens": "Contiene huevos y productos a base de huevo. Contiene leche y sus derivados..."
 }
 ```
-> The product detail also exposes `brand`, `ean`, `origin`, and a `details` block. Nutrition gives
-> **allergens + ingredients** (great for coeliac/allergy filters) but **no numeric macros**.
+> The numeric table is present only for products Mercadona has filled in; staples (pasta, eggs, plain
+> cheese) usually return none. `nutrition_information` (allergens + ingredients) is there for nearly all.
 
 ### Discover regional specialties with `--wh`
 

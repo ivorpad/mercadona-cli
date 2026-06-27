@@ -15,7 +15,7 @@ capped at 4 parallel GETs (`MERCADONA_CONCURRENCY=1..16` to tune).
 | `mercadona search <term...> [--limit N] [--category <id\|name>] [--fresh]` | full-text product search (Algolia) |
 | `mercadona batch [-f file] [--hits N] [--category <id\|name>] [--fresh]` | search many terms in ONE request (~100/call) |
 | `mercadona total [-f file]` | deterministic basket total from `<id> [qty]` lines (CLI sums it) |
-| `mercadona product <id>` | product detail + price |
+| `mercadona product <id>` | product detail + price + nutrition table (when the product has one) |
 | `mercadona categories [--id N]` | category tree, or one category's products |
 
 `batch` reads one term per line from `-f <file>` (`-f -` = stdin) or positional args. Lines
