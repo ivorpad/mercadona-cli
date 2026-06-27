@@ -122,8 +122,8 @@ func collectBasket(file string, posArgs []string) ([]basketLine, error) {
 	ln := 0
 	for sc.Scan() {
 		ln++
-		t := strings.TrimSpace(sc.Text())
-		if t == "" || strings.HasPrefix(t, "#") {
+		t := stripComment(sc.Text())
+		if t == "" {
 			continue
 		}
 		bl, err := parseBasketLine(t)
@@ -133,6 +133,16 @@ func collectBasket(file string, posArgs []string) ([]basketLine, error) {
 		lines = append(lines, bl)
 	}
 	return lines, sc.Err()
+}
+
+// stripComment drops a '#' comment — whole-line or trailing — and trims, so basket
+// and set-many files can annotate ids with the product name ("5044 1  # Arroz").
+// Product ids are numeric, so '#' is never part of one.
+func stripComment(s string) string {
+	if i := strings.IndexByte(s, '#'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
 }
 
 func parseBasketLine(s string) (basketLine, error) {

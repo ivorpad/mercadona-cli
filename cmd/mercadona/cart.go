@@ -388,8 +388,8 @@ func readChangesFile(file string) ([]cartChange, error) {
 	ln := 0
 	for sc.Scan() {
 		ln++
-		t := strings.TrimSpace(sc.Text())
-		if t == "" || strings.HasPrefix(t, "#") {
+		t := stripComment(sc.Text())
+		if t == "" {
 			continue
 		}
 		f := strings.Fields(t)

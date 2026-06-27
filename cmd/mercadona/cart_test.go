@@ -39,7 +39,9 @@ func TestCollectSetManyErrors(t *testing.T) {
 
 func TestReadChangesFile(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "changes.txt")
-	if err := os.WriteFile(p, []byte("# a comment\n10 2\n20 0\n\n30 1.5\n"), 0o644); err != nil {
+	// whole-line comment, a trailing '# name' annotation, a blank line, and a plain line.
+	body := "# a comment\n10 2  # Leche entera\n20 0\n\n30 1.5\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	ch, err := readChangesFile(p)

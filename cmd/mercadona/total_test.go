@@ -92,3 +92,19 @@ func TestParseBasketLine(t *testing.T) {
 	bad("x abc") // unparseable qty
 	bad("a b c") // too many fields
 }
+
+func TestStripComment(t *testing.T) {
+	cases := map[string]string{
+		"5044 1  # Arroz redondo Hacendado": "5044 1", // trailing comment + name
+		"5044 1#no space":                   "5044 1", // no space before #
+		"# whole-line comment":              "",       // whole-line
+		"   # indented comment":             "",
+		"60393 2":                           "60393 2", // unchanged
+		"  82830.1 1   ":                    "82830.1 1",
+	}
+	for in, want := range cases {
+		if got := stripComment(in); got != want {
+			t.Errorf("stripComment(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
