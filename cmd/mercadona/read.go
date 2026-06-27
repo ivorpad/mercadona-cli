@@ -198,7 +198,54 @@ func cmdProduct(args []string) error {
 	if pv.ShareURL != "" {
 		fmt.Printf("  url: %s\n", pv.ShareURL)
 	}
+	for _, line := range nutritionLines(pv.Nutrition()) {
+		fmt.Println(line)
+	}
 	return nil
+}
+
+// nutritionLines renders a product's nutrition table as indented human lines,
+// or nil when the product carries none (most staples). Amounts arrive as decimal
+// strings like "385.0"; a whole-number ".0" is dropped so it reads as the label
+// does ("385 kcal"), while "9.2" is left intact.
+func nutritionLines(n *client.Nutrition) []string {
+	if n == nil {
+		return nil
+	}
+	head := "  nutrición"
+	if n.PerQuantity != "" {
+		head += " (" + n.PerQuantity + ")"
+	}
+	lines := []string{head + ":"}
+	if n.EnergyCalories.Amount != "" || n.EnergyJoules.Amount != "" {
+		lines = append(lines, fmt.Sprintf("    energía: %s / %s",
+			amountUnit(n.EnergyCalories), amountUnit(n.EnergyJoules)))
+	}
+	for _, nut := range n.Nutrients {
+		lines = append(lines, "    "+nutrientStr(nut))
+		if nut.SubNutrients != nil {
+			for _, it := range nut.SubNutrients.Items {
+				lines = append(lines, "      "+nutrientStr(it))
+			}
+		}
+	}
+	return lines
+}
+
+// nutrientStr formats one labelled row as "Name: amount unit" (e.g. "Grasas: 29 g").
+func nutrientStr(n client.Nutrient) string {
+	return n.Name + ": " + amountUnit(n)
+}
+
+// amountUnit formats just the value of a row (e.g. "29 g", "385 kcal").
+func amountUnit(n client.Nutrient) string {
+	return trimAmount(n.Amount) + " " + n.Unit
+}
+
+// trimAmount drops a trailing ".0" so whole numbers read cleanly; fractional
+// amounts ("9.2", "1.1") are returned unchanged.
+func trimAmount(s string) string {
+	return strings.TrimSuffix(s, ".0")
 }
 
 func cmdCategories(args []string) error {

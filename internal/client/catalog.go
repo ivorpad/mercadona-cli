@@ -32,6 +32,50 @@ type ProductView struct {
 	Packaging   string            `json:"packaging"`
 	ShareURL    string            `json:"share_url"`
 	Price       PriceInstructions `json:"price_instructions"`
+	// ProductInformation.NutritionalInformation is the per-quantity nutrition
+	// table; the API only returns it when the request carries an x-version at or
+	// above the SPA bundle that introduced it (we already send DefaultVersion),
+	// and only for products that have it filled in (mostly prepared/processed
+	// items — most staples come back without one).
+	ProductInformation struct {
+		NutritionalInformation []Nutrition `json:"nutritional_information"`
+	} `json:"product_information"`
+}
+
+// Nutrition is one per-quantity nutritional table (e.g. "Por 100 g") as returned
+// under product_information.nutritional_information.
+type Nutrition struct {
+	PerQuantity    string     `json:"per_quantity"`
+	EnergyJoules   Nutrient   `json:"energy_joules"`
+	EnergyCalories Nutrient   `json:"energy_calories"`
+	Nutrients      []Nutrient `json:"nutrients"`
+	AccessibleText string     `json:"accessible_text"`
+}
+
+// Nutrient is one labelled amount — a top-level row (Grasas, Proteínas, Sal…),
+// an energy figure, or a sub-row (Saturadas, Azúcares). SubNutrients is set only
+// on rows that break down further.
+type Nutrient struct {
+	Name         string        `json:"name"`
+	Amount       string        `json:"amount"`
+	Unit         string        `json:"unit"`
+	SubNutrients *SubNutrients `json:"sub_nutrients,omitempty"`
+}
+
+// SubNutrients is the "de las cuales:" breakdown nested under a Nutrient.
+type SubNutrients struct {
+	Subtitle string     `json:"subtitle"`
+	Items    []Nutrient `json:"items"`
+}
+
+// Nutrition returns the product's primary nutrition table (the first the API
+// lists, i.e. the per-100g/ml one the website shows), or nil when the API
+// supplied none — which is the common case for staples.
+func (pv *ProductView) Nutrition() *Nutrition {
+	if pv == nil || len(pv.ProductInformation.NutritionalInformation) == 0 {
+		return nil
+	}
+	return &pv.ProductInformation.NutritionalInformation[0]
 }
 
 // Product returns both the projected view and the full raw JSON for a product.
