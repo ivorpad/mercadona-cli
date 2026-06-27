@@ -207,29 +207,47 @@ func cmdProduct(args []string) error {
 // nutritionLines renders a product's nutrition table as indented human lines,
 // or nil when the product carries none (most staples). Amounts arrive as decimal
 // strings like "385.0"; a whole-number ".0" is dropped so it reads as the label
-// does ("385 kcal"), while "9.2" is left intact.
+// does ("385 kcal"), while "9.2" is left intact. The header is emitted only when
+// there's at least one row beneath it, so a present-but-empty table prints nothing.
 func nutritionLines(n *client.Nutrition) []string {
 	if n == nil {
+		return nil
+	}
+	var rows []string
+	if e := energyStr(n); e != "" {
+		rows = append(rows, "    energía: "+e)
+	}
+	for _, nut := range n.Nutrients {
+		rows = append(rows, "    "+nutrientStr(nut))
+		if nut.SubNutrients != nil {
+			for _, it := range nut.SubNutrients.Items {
+				rows = append(rows, "      "+nutrientStr(it))
+			}
+		}
+	}
+	if len(rows) == 0 {
 		return nil
 	}
 	head := "  nutrición"
 	if n.PerQuantity != "" {
 		head += " (" + n.PerQuantity + ")"
 	}
-	lines := []string{head + ":"}
-	if n.EnergyCalories.Amount != "" || n.EnergyJoules.Amount != "" {
-		lines = append(lines, fmt.Sprintf("    energía: %s / %s",
-			amountUnit(n.EnergyCalories), amountUnit(n.EnergyJoules)))
+	return append([]string{head + ":"}, rows...)
+}
+
+// energyStr joins whichever energy figures the table carries — "385 kcal / 1598 kJ"
+// when both are present, just the one side when only one is, and "" when neither
+// is. Joining (rather than a fixed "%s / %s") avoids a dangling "/" on the
+// single-sided tables the data can in principle return.
+func energyStr(n *client.Nutrition) string {
+	var parts []string
+	if n.EnergyCalories.Amount != "" {
+		parts = append(parts, amountUnit(n.EnergyCalories))
 	}
-	for _, nut := range n.Nutrients {
-		lines = append(lines, "    "+nutrientStr(nut))
-		if nut.SubNutrients != nil {
-			for _, it := range nut.SubNutrients.Items {
-				lines = append(lines, "      "+nutrientStr(it))
-			}
-		}
+	if n.EnergyJoules.Amount != "" {
+		parts = append(parts, amountUnit(n.EnergyJoules))
 	}
-	return lines
+	return strings.Join(parts, " / ")
 }
 
 // nutrientStr formats one labelled row as "Name: amount unit" (e.g. "Grasas: 29 g").
