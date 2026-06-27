@@ -135,8 +135,10 @@ customer can also come from `MERCADONA_TOKEN` / `MERCADONA_COOKIE` /
 ```bash
 mercadona import-har --file tienda.mercadona.es.har   # auth (preferred; or import-curl)
 mercadona whoami                           # → "ok — customer id=…"  (confirms auth)
-mercadona cart get --json                  # inspect current cart
+mercadona cart get --json                  # inspect current cart (names, qty × unit_price, total)
 mercadona cart add 51110 2 --max 80        # add 2× a product (capped at 80 €)
+printf '51110 2\n13406 1\n' | mercadona cart set-many -f - --max 80   # many '<id> <qty>' in ONE write (0 removes)
+mercadona cart clear                       # empty the cart in one write
 mercadona checkout create --json           # open a checkout → id + default address
 mercadona checkout addresses               # list saved delivery addresses
 mercadona checkout slots --address <id>    # delivery slots (they hang off the address, not the checkout)
@@ -145,8 +147,9 @@ mercadona checkout set-delivery --checkout <id> --address <id> --slot <id>
 mercadona checkout submit --checkout <id> --max 80 --yes   # IRREVERSIBLE — places the order
 ```
 
-`cart add <id> <qty>` adds to the existing quantity; `cart set <id> <qty>` sets the absolute
-quantity (`0` removes the line). Both accept `--max`.
+`cart add` adds to the existing quantity; `cart set` sets the absolute quantity (`0` removes). For a
+whole basket, **`cart set-many -f -`** applies many `<id> <qty>` lines in a *single* write — and prices
+it first, so `--max` refuses *before* writing — while **`cart clear`** empties it. All accept `--max`.
 
 The access token (a SimpleJWT) lasts ~6 weeks; when `whoami` starts returning
 `401 token_not_valid`, re-import a fresh `Copy as cURL` (or use `login`).
@@ -170,10 +173,143 @@ Or set it once so every command is capped — `MERCADONA_MAX_EUR=100` (env), or 
 max_eur = 100        # refuse any cart/checkout whose total exceeds 100 €
 ```
 
-Precedence is **flag > env > config**; `0`/unset = no limit. Enforced on `cart add/set`,
+Precedence is **flag > env > config**; `0`/unset = no limit. Enforced on `cart add/set/set-many`,
 `checkout create`, `checkout set-delivery`, and — critically — `checkout submit`, which **fails
 closed**: with a cap set, if it can't read the order total it refuses rather than spend blind.
 (With no cap, `submit` prints a warning.)
+
+## Recipes — real examples
+
+> The interesting part isn't "an AI does your shopping." It's that one person can now do things that
+> used to need a developer or an analyst: track your *own* inflation, rank a category by €/kg, catch
+> genuine price drops, build an allergen-safe basket. Every output below is **live CLI** — and since
+> reads need no login, most are copy-paste.
+
+### Price a whole list (and get cost-per-serving) — no login
+
+`total` fetches each id's price and sums `unit_price × qty` **in integer cents** — exact,
+reproducible, and fractional quantities work for weight items. Divide by servings for €/plate.
+
+```console
+$ printf '5044 1\n60393 1\n85499 1\n16044 1\n4740 0.5\n' | mercadona total -f - --json
+{
+  "complete": true,
+  "count": 5,
+  "lines": [
+    { "id": "5044",  "name": "Arroz redondo Hacendado",               "qty": 1,   "unit_price": "1.20", "subtotal": "1.20" },
+    { "id": "60393", "name": "Gambón grande congelado",               "qty": 1,   "unit_price": "6.00", "subtotal": "6.00" },
+    { "id": "85499", "name": "Mejillón mediterráneo",                 "qty": 1,   "unit_price": "5.80", "subtotal": "5.80" },
+    { "id": "16044", "name": "Tomate triturado Hacendado",            "qty": 1,   "unit_price": "0.55", "subtotal": "0.55" },
+    { "id": "4740",  "name": "Aceite de oliva virgen extra Hacendado","qty": 0.5, "unit_price": "4.95", "subtotal": "2.48" }
+  ],
+  "total": "16.03"
+}
+```
+
+→ basket **16.03 €** for 5 lines; a paella base for 3 ≈ **5.34 €/serving**.
+
+### Get the *fresh* item, not the frozen/canned one
+
+A bare term often top-ranks the frozen or canned version. `--fresh` drops the Congelados + Conservas
+aisles, so the fresh product surfaces:
+
+```console
+$ mercadona search mejillon --limit 1
+  [18615] Mejillones de Chile en escabeche Hacendado pequeños — 2.65€   (Conservas, caldos y cremas)
+$ mercadona search mejillon --fresh --limit 1
+  [85499] Mejillón mediterráneo — 5.80€   (Marisco y pescado)
+```
+
+### Sort a whole category by price-per-kilo
+
+`reference_price` is the unit-normalised price (€/kg, €/L) on every product. Pull a whole category and
+rank by it to surface the genuine value buys:
+
+```console
+$ mercadona categories --id 118 --json   # 118 = Arroz
+```
+| id | product | price | per kilo |
+|---|---|---|---|
+| `5044` | Arroz redondo Hacendado | 1.20€ | 1.200 €/kg |
+| `5063` | Arroz largo Hacendado | 1.20€ | 1.200 €/kg |
+| `5020` | Arroz vaporizado Hacendado | 1.55€ | 1.550 €/kg |
+| `5042` | Arroz redondo J Sendra Hacendado | 1.60€ | 1.600 €/kg |
+| `5184` | Arroz integral largo Hacendado | 1.65€ | 1.650 €/kg |
+
+### Find products actually on offer (the API flags it)
+
+Each product carries `price_decreased` + `previous_unit_price`, so you can catch genuine drops — not
+marketing. A scan of ~440 staples turned up dozens:
+
+```console
+$ mercadona categories --id 112 --json | jq '.. | objects | select(.price_decreased==true)'
+```
+| id | product | was | now | drop |
+|---|---|---|---|---|
+| `4717` | Aceite de oliva virgen extra Hacendado | 14.55€ | 14.40€ | -1% |
+| `4706` | Aceite de oliva virgen extra Gran Selección | 5.95€ | 5.75€ | -3% |
+| `4718` | Aceite de oliva virgen extra Hacendado | 2.70€ | 2.60€ | -4% |
+| `5063` | Arroz largo Hacendado | 1.25€ | 1.20€ | -4% |
+| `26029` | Garbanzo cocido Hacendado | 0.85€ | 0.80€ | -6% |
+| `6305` | Pajaritas vegetales Hacendado | 1.00€ | 0.90€ | -10% |
+
+### Read allergens & ingredients per product (diet-safe baskets)
+
+```console
+$ mercadona product 10379 --json | jq '{display_name, brand, ean, nutrition_information}'
+{
+  "display_name": "Leche entera Hacendado",
+  "brand": "Hacendado",
+  "ean": "8402001002076",
+  "nutrition_information": {
+    "allergens": "Contiene leche y sus derivados (incluida la lactosa).",
+    "ingredients": "Leche entera de vaca"
+  }
+}
+```
+> The product detail also exposes `brand`, `ean`, `origin`, and a `details` block. Nutrition gives
+> **allergens + ingredients** (great for coeliac/allergy filters) but **no numeric macros**.
+
+### Discover regional specialties with `--wh`
+
+Prices are uniform nationwide (see below), but the **catalog isn't** — each warehouse stocks local
+products. Mallorca's sobrasada shelf vs Madrid's:
+
+```console
+$ mercadona search sobrasada --wh mad1 --json | jq .nbHits   # Madrid:   19
+$ mercadona search sobrasada --wh 3842 --json | jq .nbHits   # Baleares: 28
+```
+**10 sobrasada products are in Baleares but not Madrid**, e.g. `[20869] Sobrasada de Mallorca Can Pere
+Joan — 5.25€`, `[53114] Sobrasada cerdo negro de Mallorca — 14.84€`, con miel, picante…
+
+### Verify a claim: are prices identical across regions?
+
+Same product id, priced in five warehouses with `--wh`. To the cent, everywhere — islands included
+(Mercadona's "Siempre Precios Bajos" is literal):
+
+```console
+$ for wh in mad1 bcn1 vlc1 svq1 3842; do mercadona product 5044 --wh $wh --json; done
+```
+| id | product | Madrid | Barcelona | Valencia | Sevilla | Baleares | |
+|---|---|---|---|---|---|---|---|
+| `5044` | Arroz redondo | 1.20€ | 1.20€ | 1.20€ | 1.20€ | 1.20€ | ✓ same |
+| `4740` | AOVE Hacendado | 4.95€ | 4.95€ | 4.95€ | 4.95€ | 4.95€ | ✓ same |
+| `10379` | Leche entera | 5.76€ | 5.76€ | 5.76€ | 5.76€ | 5.76€ | ✓ same |
+| `60393` | Gambón | 6.00€ | 6.00€ | 6.00€ | 6.00€ | 6.00€ | ✓ same |
+| `64000` | Helado bombón | 2.90€ | 2.90€ | 2.90€ | 2.90€ | 2.90€ | ✓ same |
+
+### Compose the rest with an agent
+
+The same primitives back richer, agent-driven flows — the [Claude skill](#claude-skill) drives them,
+always capping spend with `--max` and never submitting without explicit consent:
+
+- **Personal inflation tracker** — cron the `total --json` recipe on your real basket → CSV → chart your own CPI.
+- **Reverse budgeter** — "feed 4 for a week on 50 €": batch-price candidates, optimise `reference_price` under `--max`.
+- **Household cart by chat** — "añade leche" in WhatsApp/Slack → `cart set-many` updates a shared basket through the week.
+- **Pantry-photo restock** — an agent maps a fridge photo to product *names* → `search` → `cart set-many`. (No barcode lookup — but `ean` is exposed, so you can build your own scan map.)
+- **Smart-home / calendar triggers** — Home Assistant "milk low", or "dinner party Saturday for 8" → fills the cart and books a slot.
+- **DIY Subscribe-&-Save** — a weekly cron rebuilds your staples with `cart set-many` and preps checkout; you just approve.
+- **Voice-first shopping** — a complete weekly shop by conversation, no app UI to fight: the clearest case of augmenting, not replacing.
 
 ## Design / reliability
 
