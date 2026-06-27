@@ -275,8 +275,9 @@ $ mercadona categories --id 112 --json | jq '.. | objects | select(.price_decrea
 
 ### Read nutrition, allergens & ingredients per product (diet-safe baskets)
 
-`product` prints the per-100g nutrition table for products that have one (mostly
-prepared/processed items — most staples don't carry it):
+`product` prints the per-100g nutrition table for the minority of products that
+carry one (some prepared/processed items have it, but most products — staples and
+many prepared items alike — return none):
 
 ```console
 $ mercadona product 17559
@@ -304,8 +305,9 @@ $ mercadona product 17559 --json | jq '{kcal: .product_information.nutritional_i
   "allergens": "Contiene huevos y productos a base de huevo. Contiene leche y sus derivados..."
 }
 ```
-> The numeric table is present only for products Mercadona has filled in; staples (pasta, eggs, plain
-> cheese) usually return none. `nutrition_information` (allergens + ingredients) is there for nearly all.
+> The numeric table is filled in for only a minority of products, so don't count on it for any given
+> item — most staples (pasta, eggs, plain cheese) and many prepared items return none. By contrast
+> `nutrition_information` (allergens + ingredients) is there for nearly all.
 
 ### Discover regional specialties with `--wh`
 
