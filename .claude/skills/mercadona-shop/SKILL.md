@@ -1,20 +1,11 @@
 ---
 name: mercadona-shop
 description: >-
-  Do the grocery shop at Mercadona (tienda.mercadona.es) by driving the local `mercadona`
-  CLI: turn a shopping list into real priced products, fill the cart, prepare delivery
-  checkout, and (only on explicit go-ahead) place the order. Use this whenever the user
-  wants to shop, price a grocery list, build a cart, or check out at Mercadona — including
-  Spanish phrasings like "hazme la compra", "haz la compra de Mercadona", "compra en
-  Mercadona", "añade X al carrito", "pídeme estos productos", "¿cuánto cuesta esta lista?",
-  and English ones like "do my Mercadona shop", "price this grocery list at Mercadona",
-  "fill my Mercadona cart", "order these groceries". Trigger even when the user just pastes
-  a list of groceries and mentions Mercadona without saying "skill" or "CLI". Also use when the
-  user wants to cook a dish or recipe and buy the ingredients at Mercadona ("quiero hacer una
-  paella", "ingredientes para una cena para 6"): it asks how many people and any allergies before
-  it prices, so it never guesses the headcount. Always confirm the resolved products before
-  touching the cart, and never place the order without explicit consent. Do NOT use for other
-  supermarkets (Carrefour, Lidl, Amazon) — this is Mercadona-only.
+  Do the grocery shop at Mercadona (tienda.mercadona.es) through the local
+  mercadona CLI: turn a shopping list or recipe into priced products, fill the
+  cart, and prepare checkout. Use for Mercadona requests such as hazme la
+  compra, añade al carrito, or price this list. Mercadona only. Never order
+  without explicit consent for the specific reviewed order.
 ---
 
 # Mercadona shop

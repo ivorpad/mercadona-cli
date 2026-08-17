@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mercadona Shop"
+  short_description: "Plan and manage a Mercadona shop safely"
+  default_prompt: "Use $mercadona-shop to price this grocery list and prepare a reviewed Mercadona cart."

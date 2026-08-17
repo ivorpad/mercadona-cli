@@ -7,9 +7,18 @@ deps, structured `--json` output for programmatic/agent use.
 > Unofficial. Mercadona has no public API. Bring your own credentials; use at a
 > sane request rate. This talks to the same HTTP endpoints the website does.
 
+## UrbOS relationship
+
+Within UrbOS, this independent repository lives at `tools/mercadona-cli/`
+beside `tools/alcampo-cli/`. The Alcampo tool uses a stricter, digest-bound cart
+plan and has no checkout, payment, or order-submission capability. The shared
+comparison and routing index is maintained at
+`tools/mission-control/docs/reference/supermarket-clis.md`.
+
 ## Install
 
-**npm** — downloads the prebuilt binary for your platform on install:
+**npm** installs a lifecycle-script-free wrapper. The first command downloads
+the prebuilt binary for your platform and caches it for later runs:
 
 ```bash
 npm install -g @ivorpad/mercadona      # puts `mercadona` on your PATH
@@ -376,13 +385,18 @@ State lives in `~/.mercadona/` (override with `MERCADONA_CONFIG_DIR`):
 - `token.json` — cached session: access + refresh token + cookie (machine-managed).
 - `algolia.json` — cached/auto-refreshed search credentials.
 
-## Claude skill
+## Agent skill
 
-This repo bundles a Claude Code skill, **`mercadona-shop`** (`.claude/skills/mercadona-shop/`),
-that drives this CLI to do the grocery shop: turn a list into priced products, fill the cart,
-prepare delivery checkout, and place the order only on explicit user consent. Install it where
-your Claude reads skills (symlink or copy `.claude/skills/mercadona-shop` into `~/.claude/skills/`);
-it points back at this binary, so build the CLI first.
+This repo bundles the tracked **`mercadona-shop`** skill at
+`.claude/skills/mercadona-shop/`. It turns a list into priced products, fills
+the cart, prepares delivery checkout, and places an order only after explicit
+consent for the specific reviewed order.
+
+Claude can symlink that directory into `~/.claude/skills/`. Codex uses the
+repo-local `.agents/skills/mercadona-shop` compatibility symlink or a workspace
+skill symlink pointing to the same tracked directory. Keep one canonical copy
+so the two agent runtimes cannot drift. The skill expects `mercadona` on
+`PATH`; install the npm package or build the CLI first.
 
 ## Status
 
