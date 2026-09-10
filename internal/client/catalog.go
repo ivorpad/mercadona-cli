@@ -31,6 +31,7 @@ type ProductView struct {
 	DisplayName string            `json:"display_name"`
 	Packaging   string            `json:"packaging"`
 	ShareURL    string            `json:"share_url"`
+	Published   bool              `json:"published"`
 	Price       PriceInstructions `json:"price_instructions"`
 	// ProductInformation.NutritionalInformation is the per-quantity nutrition
 	// table; the API only returns it when the request carries an x-version at or
