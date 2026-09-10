@@ -76,7 +76,7 @@ $ mercadona batch -f lista.txt
 • mayonesa         → [13406] Mayonesa Hacendado — 1.20€ (2.400€/L)
 ```
 
-### Authenticated: `import-har` (preferred) / `import-curl` / `login`, `whoami`, `cart`, `checkout`
+### Authenticated: `import-har` (preferred) / `import-curl` / `login`, `whoami`, `regulars`, `cart`, `checkout`
 
 The API authenticates with a **Bearer token** (a SimpleJWT). The first sign-in must happen in a
 browser (password login needs a Google reCAPTCHA Enterprise token; Google-account users have no
@@ -135,6 +135,7 @@ customer can also come from `MERCADONA_TOKEN` / `MERCADONA_COOKIE` /
 ```bash
 mercadona import-har --file tienda.mercadona.es.har   # auth (preferred; or import-curl)
 mercadona whoami                           # → "ok — customer id=…"  (confirms auth)
+mercadona regulars                        # "Mis habituales": prices + recommended quantities
 mercadona cart get --json                  # inspect current cart (names, qty × unit_price, total)
 mercadona cart add 51110 2 --max 80        # add 2× a product (capped at 80 €)
 printf '51110 2\n13406 1\n' | mercadona cart set-many -f - --max 80   # many '<id> <qty>' in ONE write (0 removes)
@@ -387,7 +388,7 @@ it points back at this binary, so build the CLI first.
 ## Status
 
 Read core (`search`, `batch`, `product`, `categories`) and the full authenticated leg
-(`import-har`/`import-curl`/`set-refresh`, `whoami`, `cart`, `checkout`) are implemented and
+(`import-har`/`import-curl`/`set-refresh`, `whoami`, `regulars`, `cart`, `checkout`) are implemented and
 verified live: reads, Algolia self-refresh, the uTLS fingerprint, headless token refresh, and a
 real-session `cart get` → `checkout create` → `set-delivery` → `checkout get` all work, and the
 order total the spending guard reads is confirmed against a live checkout. `checkout submit` is

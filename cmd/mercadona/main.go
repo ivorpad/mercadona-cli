@@ -48,6 +48,8 @@ func main() {
 		err = cmdSetPostal(os.Args[2:])
 	case "whoami":
 		err = cmdWhoami(os.Args[2:])
+	case "regulars":
+		err = cmdRegulars(os.Args[2:])
 	case "cart":
 		err = cmdCart(os.Args[2:])
 	case "checkout":
@@ -111,6 +113,7 @@ AUTHENTICATED COMMANDS (bring your own credentials):
   set-refresh <token>     seed a refresh token (from one browser login) into config.toml;
                           the CLI then auto-renews the session headlessly (--stdin supported)
   whoami                  verify the session (GET /api/customers/me/)
+  regulars                list "Mis habituales" with recommended quantities
   cart get                show current cart (names, qty × unit_price, total; --json for raw)
   cart add <id> <qty>     add qty of a product to the cart (concise; --json for raw)
   cart set <id> <qty>     set a product's absolute qty (0 removes)

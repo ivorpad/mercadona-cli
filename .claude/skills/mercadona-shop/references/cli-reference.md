@@ -92,6 +92,7 @@ and leaves config untouched. Example: `28022 → mad1`, `28013 → mad3` (same c
 | `mercadona import-curl [--file f]` | import a browser session (access token + cookie); **no** refresh |
 | `mercadona login [--user E] [--password-stdin] [--save]` | password login — **needs a browser reCAPTCHA**, fails headless |
 | `mercadona whoami` | verify the session (prints customer id) |
+| `mercadona regulars [--wh W]` | list "Mis habituales" in relevance order with prices and recommended quantities (`--json` = raw API response) |
 
 Password login requires a Google reCAPTCHA Enterprise token, so it can't be done headlessly —
 the first login is a browser step. The **refresh token** then renews the session with no
@@ -119,6 +120,10 @@ prefer set-refresh / import-curl.
 Auth precedence: flags > env (`MERCADONA_TOKEN`/`COOKIE`/`CUSTOMER`/`USER`/`PASS`) >
 `~/.mercadona/config.toml` > cached session (`token.json`). The customer id is decoded from
 the token's `customer_uuid` claim — the literal `me` alias is rejected (403).
+
+`regulars` reads `/recommendations/myregulars/` for the authenticated customer and active
+warehouse. Its human view shows product id, name, packaging, price, reference price, availability,
+and Mercadona's recommended quantity; pass `--json` to retain every field from the upstream list.
 
 ## Cart commands (auth required)
 

@@ -121,6 +121,10 @@ reCAPTCHA token and will fail; it exists only as a browser-assisted fallback.
 Verify either way with `mercadona whoami` → `ok — authenticated. customer id=…`. On
 `not authenticated` or `401 token_not_valid`, see `references/troubleshooting.md`.
 
+When the user asks for their usual staples or leaves a product choice open, run `mercadona
+regulars` before a generic search. It returns the account's "Mis habituales" products in relevance
+order with Mercadona's recommended quantities; use the id from that result for cart operations.
+
 **Never echo secrets.** Feed tokens/passwords via stdin or env, never as flags/argv; don't
 print tokens or cookies back to the user.
 
